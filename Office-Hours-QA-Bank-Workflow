@@ -1,0 +1,112 @@
+name: Office-Hours-QA-Bank
+description: Analyzes new Drive transcripts by indexing transcripts and
+  converting to QA and Cleanup GCS
+tags: [ "ada", "drive-automation", "office-hours-search" ]
+triggers:
+  - type: manual
+
+consts:
+  splitterUrl: "https://us-central1-elastic-customer-eng.cloudfunctions.net/split_video"
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbxrTdHzzPc0Hn8YuFiMz71a\
+    ekr6XJdhSri_eVvwAtEk-JWbPTMG_6bYNhRI8zPN7w9F/exec"
+  role: "user"
+
+inputs:
+  - name: user_question
+    type: string
+    required: true
+    default: "Describe in detail the questions and answers in the video. Capture all
+      the solution details. Keep the speakers and approximate timestamps for
+      each Q/A section."
+  - name: summarize_transcript_prompt
+    type: string
+    required: true
+    default: "Group the transcripts into meaningful chunks. Keep the speaker and
+      timestamp. Remove any filler words."
+
+steps:
+  # -----------------------------------------------------------
+  # STEP 1: CHECK DRIVE (Returns list of new GCS URIs)
+  # -----------------------------------------------------------
+  - name: trigger-drive
+    type: http
+    with:
+      url: "{{ consts.appsScriptUrl }}"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+      body: '{"secret_key":
+        "uvlkrVWJs9+YHA+8g1wXj3tda+IAxn9Bcg+Yxffd8oYwUMOkfPqDaoVyeYuOfVUA",
+        "reset_timer": true}'
+
+  # -----------------------------------------------------------
+  # STEP 2: Lookup join index as a temp workaround to get drive location until we figure out foreach syntax at the data level
+  # -----------------------------------------------------------
+  - name: lookup_drive_source_folders 
+    type: foreach
+    foreach: "{{ steps.trigger-drive.output.data.source_folders | json}}"
+    steps:
+      - name: post-lookupqa-drive_source_folders
+        type: http
+        with:
+          url: "https://project-ada-84b433.es.us-west2.gcp.elastic-cloud.com/office_hours\
+            _lookupqa/_doc"
+          method: "POST"
+          headers:
+            Content-Type: "application/json"
+            Authorization: "ApiKey
+              RVlTa01ab0JWWEZoUDJrYkRCMVM6RWpaQ3d1a1U5aWpNajQwazFZeTludw=="
+          body:
+            id: "{{steps.trigger-drive.output.headers.date}}-{{foreach.index}}"
+            drive_subfolder: "{{steps.lookup_drive_source_folders.item}}"
+          timeout: "500s"
+
+  # -----------------------------------------------------------
+  # STEP 2: PROCESS FILES (Assuming transcript already exists, summarize and analyze, preserve and index timestamped data to Elastic)
+  # -----------------------------------------------------------
+  - name: process-transcript_items
+    type: foreach
+    foreach: "{{ steps.trigger-drive.output.data.new_files | json_parse}}"
+    steps:
+      - name: summarize-existing-text-transcript-keep-timestamps
+        type: gemini.run
+        connector-id: gemini-explainer-connector
+        with:
+          model: 'gemini-2.5-pro'
+          body: '{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"text/plain","fileUri":"{{steps.process-transcript_items.item}}"}},{"text":"{{inputs.summarize_transcript_prompt}}"}]}]}'
+
+      - name: analyze-existing-text-transcript
+        type: gemini.run
+        connector-id: gemini-explainer-connector
+        with:
+          model: 'gemini-2.5-pro'
+          body: '{"contents":[{"role":"user","parts":[{"fileData":{"mimeType":"text/plain","fileUri":"{{steps.process-transcript_items.item}}"}},{"text":"{{inputs.user_question}}"}]}]}'
+
+      - name: post-semantic-qa-existing-transcript
+        type: http
+        with:
+          url: "https://project-ada-84b433.es.us-west2.gcp.elastic-cloud.com/office_hours\
+            _qa/_doc"
+          method: "POST"
+          headers:
+            Content-Type: "application/json"
+            Authorization: "ApiKey
+              RVlTa01ab0JWWEZoUDJrYkRCMVM6RWpaQ3d1a1U5aWpNajQwazFZeTludw=="
+          body:
+            user: "project-ada@elastic.co"
+            id: "{{steps.trigger-drive.output.headers.date}}-{{foreach.index}}"
+            qa: "{{ steps['analyze-existing-text-transcript'].output.completion }}"
+            semantic_qa: "{{ steps['analyze-existing-text-transcript'].output.completion }}"
+          timeout: "500s"
+        # 2.3 Cleanup (Deletes the text transcript file from the GCS bucket)
+      - name: clean_up_file-existing-transcript
+        type: http
+        with:
+          url: "{{ consts.splitterUrl }}"
+          method: "POST"
+          headers:
+            Content-Type: "application/json"
+          body:
+            action: "cleanup"
+            fileUri: "{{steps.process-transcript_items.item}}"
+enabled: true
