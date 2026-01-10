@@ -4,7 +4,7 @@ const CLOUD_FUNCTION_URL = 'https://ingest-drive-video-2t3s3mceqa-uc.a.run.app';
 const BUCKET_NAME = 'ada-bucket';
 
 // SECURITY: Define your secret key here
-const API_SECRET_KEY = 'uvlkrVWJs9+YHA+8g1wXj3tda+IAxn9Bcg+Yxffd8oYwUMOkfPqDaoVyeYuOfVUA'; 
+const API_SECRET_KEY = 'Replace with KEY'; 
 
 function doPost(e) {
   // LOGGING: Confirm execution started
