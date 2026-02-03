@@ -15,9 +15,7 @@ inputs:
   - name: user_question
     type: string
     required: true
-    default: "Describe in detail the questions and answers in the video. Capture all
-      the solution details. Keep the speakers and approximate timestamps for
-      each Q/A section."
+    default: "Describe in detail the questions and answers in the video. Capture all the solution details. Keep the speakers and approximate timestamps for each Q/A section."
 
 steps:
   # -----------------------------------------------------------
