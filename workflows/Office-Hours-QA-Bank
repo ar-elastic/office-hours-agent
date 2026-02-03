@@ -1,16 +1,14 @@
 name: Office-Hours-QA-Bank
 description: Scheduled daily drive transcript ingestion. Ensure transcript file exists in month folder and follows naming convention ending in transcript.vtt. This workflow will analyze and extract QA, chunk and ingest into Elastic and Cleanup GCS (used as temp storage for file processing).
-tags: [ "ada", "drive-automation", "office-hours-search" ]
 triggers:
   - type: scheduled
     with:
       every: 1440m
 
 consts:
-  splitterUrl: "https://us-central1-elastic-customer-eng.cloudfunctions.net/split_video"
-  appsScriptUrl: "https://script.google.com/macros/s/AKfycbxrTdHzzPc0Hn8YuFiMz71a\
-    ekr6XJdhSri_eVvwAtEk-JWbPTMG_6bYNhRI8zPN7w9F/exec"
-  chonkerUrl: "https://us-central1-elastic-customer-eng.cloudfunctions.net/split-document-func"
+  splitterUrl: "Replace with your own splitter and cleanup cloud function endpoint URL here"
+  appsScriptUrl: "Replace with your own Appscript endpoint URL here"
+  chonkerUrl: "Replace with your own Chonker endpoint URL here"
   role: "user"
 
 inputs:
@@ -23,7 +21,7 @@ inputs:
 
 steps:
   # -----------------------------------------------------------
-  # STEP 1: CHECK DRIVE (Returns list of new GCS URIs)
+  # STEP 1: CHECK DRIVE (Returns list of new GCS URIs) Replace with your own randomly generated Apps Script secret_key  
   # -----------------------------------------------------------
   - name: trigger-drive
     type: http
@@ -46,8 +44,7 @@ steps:
       - name: post-lookupqa-drive_source_folders
         type: http
         with:
-          url: "https://project-ada-84b433.es.us-west2.gcp.elastic-cloud.com/office_hours\
-            _lookupqa/_doc"
+          url: "YOUR-ELASTIC-KIBANA-PUBLIC-ENDPOINT/office_hours_lookupqa/_doc"
           method: "POST"
           headers:
             Content-Type: "application/json"
@@ -89,7 +86,7 @@ steps:
           - name: post-chonker-chunks
             type: http
             with:
-              url: "https://project-ada-84b433.es.us-west2.gcp.elastic-cloud.com/office_hours_qa/_doc"
+              url: "YOUR-ELASTIC-KIBANA-PUBLIC-ENDPOINT/office_hours_qa/_doc"
               method: POST
               headers: 
                 Content-Type: "application/json"
