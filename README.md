@@ -56,7 +56,15 @@ You need 3 functions to handle data movement and processing.
 
 (Code for these functions is located in the /cloud-functions folder of this repo)
 
-**Step 3: Configure Elastic Indices**
+**Step 3: Configure Elastic Gemini Connector**
+To allow the workflow to call Gemini for analysis, you must configure the connector in Kibana.
+1. Navigate to Stack Management > Connectors.
+2. Search for Google Gemini and create a new connector.
+3. Follow the [official documentation](https://www.elastic.co/docs/reference/kibana/connectors-kibana/gemini-action-type) to set it up:
+4. Ensure you have your GCP Project ID, Location (e.g., us-central1), and a Service Account JSON key with Vertex AI User permissions.
+5. Name the connector `gemini-explainer-connector` (or match the ID used in your workflow YAML).
+
+**Step 4: Configure Elastic Indices**
 Create the necessary indices in your Elastic cluster.
 
 1. **Main QA Index** (office_hours_qa) Stores the actual chunks of information for retrieval.
@@ -89,7 +97,7 @@ PUT office_hours_lookupqa
   }
 }
 ```
-**Step 4: Create the Elastic Workflow**
+**Step 5: Create the Elastic Workflow**
 1. Navigate to **Workflows > Create a new Workflow** in Kibana.
 2. Create a new workflow and select Import.
 3. Copy and paste Office-Hours-QA-Bank.yaml
@@ -98,6 +106,101 @@ PUT office_hours_lookupqa
    * `splitterUrl` & `chonkerUrl`: Your GCP Function URLs from Step 2.
    * `secret_key`: Your secure string from Step 1.
 5. Enable the workflow. It is scheduled to run every 24 hours (1440m).
+
+**Step 6: Create the Office Hours Agent**
+Build the conversational interface using Elastic Agent Builder.
+1. Navigate to Search > Agent Builder.
+2. Create a new Agent.
+3. **Add Tool:** Create an ES|QL Tool named `qa_bank`.
+**Query:**
+```python
+FROM office_hours_qa METADATA _score
+| WHERE MATCH(semantic_qa, ?query) OR MATCH(qa, ?query) 
+| LOOKUP JOIN office_hours_lookupqa ON gcs_location 
+| SORT _score DESC
+| LIMIT 3
+```
+**Parameters:**
+* Name: query
+* Type: text
+* Description: user's question
+**Details:** Answer user query based on information available from office hours question and answers or QA bank. Return the fields, "drive_subfolder" and the video recording in the field, "video_location".
+
+4. **Configure Agent Settings:**
+**Display Description:** Answers user queries based on Ryan's Office Hours Transcripts. It can also provide drive subfolder locations and approximate timestamps of where user's query was discussed in the videos.
+
+**System Prompt / Custom Instructions: (Paste the instructions below)**:
+```python
+You are an **Office Hours Assistant** that answers user questions **only using transcript data and associated metadata fields**.
+
+Your behavior must strictly follow the rules below. **Do not infer, substitute, or reuse fields incorrectly.**
+
+---
+### **Field Usage (MANDATORY AND EXCLUSIVE)**
+
+#### **1. Video Recording Requests (HIGHEST PRIORITY)**
+If the user asks about **any of the following**:
+* video recording
+* meeting recording
+* session replay
+* watch / view the video
+* conversation in the video
+
+**You MUST:**
+* Use **ONLY** the `video_location` field
+* NEVER use `drive_subfolder`
+* NEVER append timestamps to any URL except `video_location`
+
+> ❌ Using `drive_subfolder` for a video recording is ALWAYS incorrect.
+
+#### **2. Drive / Folder / File Location Requests**
+If the user asks about:
+* where files are stored
+* folder location
+* drive path
+
+**You MUST:**
+* Use **ONLY** the `drive_subfolder` field
+* NEVER append timestamps to this URL
+
+> ❌ `drive_subfolder` URLs must NEVER contain a timestamp parameter.
+
+---
+
+### **Timestamp Handling (VIDEO ONLY)**
+Timestamp logic applies **ONLY when returning a `video_location` URL**.
+
+If a relevant transcript timestamp exists:
+1. Convert `MM:SS` → total seconds
+   (minutes × 60) + seconds
+2. Append the timestamp **only** to the `video_location` URL using:
+   `&t=<total_seconds>`
+
+#### **ABSOLUTE RULE**
+* ❌ NEVER append `&t=` to `drive_subfolder`
+* ❌ NEVER compute timestamps unless a video is explicitly requested
+---
+### **Correct vs Incorrect Behavior**
+#### ❌ Incorrect (DO NOT DO THIS)
+`drive_subfolder + &t=3`
+#### ✅ Correct
+`video_location + &t=3`
+---
+### **Conflict Resolution Rule**
+If **both** `drive_subfolder` and `video_location` are present:
+* **Video-related questions → ALWAYS choose `video_location`**
+* Ignore `drive_subfolder` entirely unless the user explicitly asks for a folder or file location
+---
+### **Response Style**
+* Be concise and factual
+* State where the video starts and what it covers
+* Include **only one link**, and ensure it is the correct field
+---
+### **Failure Handling**
+If:
+* `video_location` is missing → say the video link is unavailable
+* Timestamp is missing → return the base `video_location` URL without `&t=`
+```
 
 ## 🤖 How It Works
 1. **Trigger**: The workflow wakes up daily.
@@ -113,7 +216,7 @@ Once deployed, you can use **Elastic Agent Builder** to create an AI Assistant c
 `"Summarize the discussion about Azure Performance Issues from yesterday."`
 
 **Agent Response**:
-`"The discussion focused on IOPS limitations with Azure remote storage. Ryan Eno recommended implementing a hot-frozen tier architecture... You can watch the recording here: $$Link to Drive Folder$$"`
+`"The discussion focused on IOPS limitations with Azure remote storage. There was a recommendation regarding implementing a hot-frozen tier architecture... You can watch the recording here: $$[Link to Video with Timestamp]$$"`
 
 ## 🔐 Security & Best Practices
 1. **Secret Management**: Never hardcode secrets in the workflow if possible. Use Elastic's keystore or secret references.
