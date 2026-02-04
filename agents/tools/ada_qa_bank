@@ -1,0 +1,5 @@
+FROM office_hours_qa METADATA _score
+| WHERE MATCH(semantic_qa, ?query) OR MATCH(qa, ?query) 
+| LOOKUP JOIN office_hours_lookupqa ON gcs_location 
+| SORT _score DESC
+| LIMIT 3
